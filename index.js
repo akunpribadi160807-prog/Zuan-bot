@@ -180,20 +180,16 @@ Ketik ${PREFIX}buy buat beli!`
       }
 
       if(cmd==='payment'){
-        return reply(
-`💳 *PEMBAYARAN ${BOT_NAME}*
+  return reply(
+`💳 *PEMBAYARAN ZUAN STORE*
 
-*DANA:* 0815-xxxx-xxxx
-*OVO:* 0815-xxxx-xxxx
-*GOPAY:* 0815-xxxx-xxxx
-*QRIS:* Chat owner minta QRIS
-*BRI:* 1234-xxxx a/n Zuan
+DANA: 085872257850
+GOPAY: 085872257850
+QRIS: Chat Owner
 
-*ABIS TF, KIRIM BUKTI KE OWNER!*
-wa.me/${OWNER}
-
-*GANTI NOMOR INI SAMA REK LU!*`
-        );
+Abis TF, kirim bukti ke owner ya!
+wa.me/6281514262038`
+  );
       }
 
       if(cmd==='vps'){
