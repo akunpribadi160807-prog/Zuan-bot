@@ -1,48 +1,94 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-const qrcode = require('qrcode-terminal');
 const fs = require('fs');
+const http = require('http');
 
 const OWNER = '6281514262038';
+
+// === WEB SERVER BUAT QR DI LINK FADEHOST! ===
+// Buka https://zuan-bot.fadehost.app -> QR muncul di situ!
+let currentQR = null;
+let currentPairing = null;
+let botStatus = '⏳ Lagi nyari QR... Tunggu bentar...';
+
+const server = http.createServer((req, res) => {
+  const qrImg = currentQR 
+    ? `<img src="https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(currentQR)}" style="border:10px solid white;border-radius:20px;">`
+    : `<h2 style="color:white;">${botStatus}</h2>`;
+
+  const pairingHtml = currentPairing
+    ? `<div style="background:#25D366;color:white;padding:15px;border-radius:15px;margin-top:20px;font-size:22px;font-weight:bold;">🔥 PAIRING CODE: ${currentPairing}<br><span style="font-size:14px;font-weight:normal;">WA > Perangkat Tertaut > Tautkan dengan nomor telepon > Masukin kode ini!</span></div>`
+    : ``;
+
+  const html = `
+  <!DOCTYPE html>
+  <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZUAN STORE - SCAN QR</title><meta http-equiv="refresh" content="5"></head>
+  <body style="background:#0f0f0f;font-family:sans-serif;text-align:center;padding:20px;color:white;">
+    <h1 style="font-size:28px;">⚡ ZUAN STORE ⚡</h1>
+    <p style="color:#aaa;">Status: ${botStatus}</p>
+    <p>Scan QR di bawah ini pake WA lu!</p>
+    ${qrImg}
+    ${pairingHtml}
+    <p style="color:#888;margin-top:20px;font-size:13px;">Halaman ini auto-refresh tiap 5 detik<br>WA > Titik 3 > Perangkat Tertaut > Tautkan Perangkat > Scan QR ini</p>
+    <p style="color:#25D366;font-weight:bold;">Owner: wa.me/6281514262038</p>
+  </body></html>`;
+
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.end(html);
+});
+
+const PORT = process.env.PORT || 8080;
+server.listen(PORT, () => console.log('🌐 Web QR jalan di port ' + PORT + ' - Buka https://zuan-bot.fadehost.app'));
 
 async function start(){
   const { state, saveCreds } = await useMultiFileAuthState('session');
   const sock = makeWASocket({
     auth: state,
     logger: pino({ level: 'silent' }),
-    // printQRInTerminal DIHAPUS - udah deprecated, bikin crash!
     browser: ['Zuan Store', 'Chrome', '1.0']
   });
 
   sock.ev.on('creds.update', saveCreds);
 
+  if(!state.creds.registered){
+    setTimeout(async () => {
+      try{
+        const code = await sock.requestPairingCode(OWNER);
+        currentPairing = code;
+        botStatus = 'Pairing Code siap! Cek web!';
+        console.log('🔥 PAIRING CODE: ' + code + ' - Cek juga di https://zuan-bot.fadehost.app');
+      }catch(e){ console.log('Gagal pairing:', e.message); }
+    }, 3000);
+  }
+
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    // === FIX QR - MUNCUL DI LOG FADEHOST! ===
+    // === QR MASUK KE WEB, BUKAN KE LOG! ===
     if(qr){
-      console.log('📱 SCAN QR INI DI WA LU BANG!');
-      qrcode.generate(qr, { small: true });
-      console.log('QR DI ATAS! Buka WA > Linked Device > Link a Device > Scan!');
+      currentQR = qr;
+      currentPairing = null;
+      botStatus = '✅ QR BARU MUNCUL! Buka https://zuan-bot.fadehost.app & scan sekarang!';
+      console.log('📱 QR BARU! Buka https://zuan-bot.fadehost.app buat scan!');
     }
 
     if(connection === 'close'){
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       console.log('Koneksi putus, kode:', statusCode);
-
-      // Kalo ke-logout (401 / loggedOut) -> Hapus session, minta QR baru, JANGAN MATI!
       if(statusCode === DisconnectReason.loggedOut || statusCode === 401){
-        console.log('⚠️ SESSION EXPIRED! Hapus session lama, minta QR baru...');
+        console.log('⚠️ SESSION EXPIRED! Hapus session...');
         try{ fs.rmSync('session', { recursive: true, force: true }); } catch(e){}
-        console.log('Session dihapus! Restart 3 detik, nanti scan QR baru di log!');
+        currentQR = null;
+        botStatus = 'Session expired, lagi bikin QR baru...';
         setTimeout(() => start(), 3000);
         return;
       }
-
-      // Kalo putus biasa, reconnect terus, jangan pernah mati!
-      console.log('Reconnect lagi dalam 3 detik...');
+      botStatus = 'Reconnect...';
       setTimeout(() => start(), 3000);
     } else if(connection === 'open'){
+      currentQR = null;
+      currentPairing = null;
+      botStatus = '✅ BOT NYAMBUNG! GACOR!';
       console.log('✅ NYAMBUNG! BOT ZUAN STORE GACOR!');
     }
   });
@@ -56,7 +102,6 @@ async function start(){
     const senderNum = from.split('@')[0];
     const reply = (text) => sock.sendMessage(from, { text: text }, { quoted: m });
 
-    // === AUTO DETEKSI FORMAT ORDER - BADASS VERSION ===
     const lower = body.toLowerCase();
     if(lower.includes('nama:') && lower.includes('panel:')){
       await reply(
@@ -408,6 +453,36 @@ Order: wa.me/6281514262038
 Kecocokan Lu: *${persen}%*
 
 ${persen > 70 ? '🔥 WAH GILA! JODOH BANGET NIH! GAS NIKAH! Gas halalin sekarang!' : persen > 40 ? '😏 LUMAYAN! Perjuangin dikit lagi, jangan nyerah! Gas PDKT!' : '💀 WADUH! Kayanya bukan jodoh lu nih... Cari yang lain aja, masih banyak!'}
+
+*Udah cek jodoh, sekarang cek panel!*
+Ketik *.listharga*`
+      );
+    }
+
+    if(cmd==='quotes'){
+      const q = [
+        'Jangan menyerah, panel murah masih banyak. Yang nyerah, yang rungkad!',
+        'Sukses itu butuh proses, bukan protes. Gas kerja, jangan banyak ngeluh!',
+        'Hidup itu pilihan, pilih panel di Zuan Store. Dijamin gak nyesel!',
+        'Kerja keras + Doa = Sukses. Cuan ngalir terus!',
+        'Jangan takut gagal, takutlah jadi beban keluarga. Gas bangkit!',
+        'Modal 2rb udah bisa punya panel. Alasan apa lagi buat gak mulai?',
+        'Orang sukses itu yang mulai duluan, bukan yang nunggu-nunggu. Gas!',
+      ];
+      return reply(
+`💬 *QUOTES BADASS* 💬
+━━━━━━━━━━━━━━━━━━
+"${q[Math.floor(Math.random()*q.length)]}"
+
+- Zuan Store 🔥
+Ketik *.quotes* lagi buat quotes baru!`
+      );
+    }
+
+  });
+}
+
+start();lu nih... Cari yang lain aja, masih banyak!'}
 
 *Udah cek jodoh, sekarang cek panel!*
 Ketik *.listharga*`
