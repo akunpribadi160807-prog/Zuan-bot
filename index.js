@@ -1,14 +1,43 @@
+// ============================================================
+//  ZUAN STORE - BOT WHATSAPP
+//  OWNER : 6281514262038
+//  FITUR : MENU, HARGA, RESELLER, VPS, PAYMENT, ORDER OTOMATIS
+//  LOGIN : CUMA QR CODE, NO PAIRING CODE!
+//  WEB QR: https://zuan-bot.fadehost.app
+// ============================================================
+//  CARA PAKE:
+//  1. Upload file ini ke GitHub sebagai index.js
+//  2. Fadehost auto deploy
+//  3. Buka https://zuan-bot.fadehost.app
+//  4. Scan QR nya pake WA bot
+//  5. Beres! Bot nyambung!
+// ============================================================
+
 let makeWASocket, useMultiFileAuthState, DisconnectReason;
+
 try {
-  ({ default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys'));
+  ({
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason
+  } = require('@whiskeysockets/baileys'));
 } catch (e) {
-  console.log('ERROR Baileys belum ke-install!', e.message);
+  console.log('ERROR Baileys belum ke-install!');
+  console.log(e.message);
   process.exit(1);
 }
 
+const fs = require('fs');
 const http = require('http');
+
+// ============================================================
+//  SETTING OWNER
+// ============================================================
 const OWNER = '6281514262038';
 
+// ============================================================
+//  LOGGER - BIAR LOG GAK PENUH
+// ============================================================
 const logger = {
   level: 'silent',
   child: () => logger,
@@ -20,14 +49,24 @@ const logger = {
   fatal: () => {}
 };
 
-// === CUMA QR, NO PAIRING! ===
+// ============================================================
+//  QR & STATUS
+//  CUMA QR, NO PAIRING!
+// ============================================================
 let currentQR = null;
 let botStatus = 'Lagi nyari QR... Tunggu bentar...';
 
+// ============================================================
+//  WEB SERVER - BUAT NAMPILIN QR
+// ============================================================
 const server = http.createServer((req, res) => {
-  const qrImg = currentQR
-    ? `<img src="https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(currentQR)}" style="border:10px solid white;border-radius:20px;">`
-    : `<h2 style="color:white;">${botStatus}</h2>`;
+
+  let qrImg = '';
+  if (currentQR) {
+    qrImg = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(currentQR)}" style="border:10px solid white;border-radius:20px;">`;
+  } else {
+    qrImg = `<h2 style="color:white;">${botStatus}</h2>`;
+  }
 
   const html = `
   <!DOCTYPE html>
@@ -56,10 +95,17 @@ const server = http.createServer((req, res) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => console.log('Web QR jalan di port ' + PORT));
+server.listen(PORT, () => {
+  console.log('Web QR jalan di port ' + PORT);
+});
 
+// ============================================================
+//  FUNGSI UTAMA - START BOT
+// ============================================================
 async function start() {
+
   const { state, saveCreds } = await useMultiFileAuthState('session');
+
   const sock = makeWASocket({
     auth: state,
     logger: logger,
@@ -68,9 +114,11 @@ async function start() {
 
   sock.ev.on('creds.update', saveCreds);
 
-  // NO PAIRING CODE! NO SOCK.END! NO HAPUS SESSION!
-  // Biar bot yang udah nyambung gak dimatiin!
+  // ==========================================================
+  //  CONNECTION - CUMA QR!
+  // ==========================================================
   sock.ev.on('connection.update', (update) => {
+
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
@@ -82,72 +130,98 @@ async function start() {
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       console.log('Koneksi putus, kode:', statusCode);
+
+      // 401 = SESSION MATI! HARUS DIHAPUS BIAR QR BARU MUNCUL!
+      // KALO GAK DIHAPUS, BAKAL LOOP 401 TERUS!
+      if (statusCode === 401 || statusCode === DisconnectReason.loggedOut) {
+        console.log('SESSION MATI! Hapus session mati, bikin QR baru...');
+        try {
+          fs.rmSync('session', { recursive: true, force: true });
+        } catch (e) {}
+        currentQR = null;
+        botStatus = 'Session lama mati, lagi bikin QR baru... Buka web!';
+        setTimeout(() => start(), 3000);
+        return;
+      }
+
+      // KALO PUTUS BIASA, RECONNECT AJA, JANGAN HAPUS SESSION!
       botStatus = 'Reconnect... Tunggu bentar, jangan scan ulang dulu!';
       setTimeout(() => start(), 5000);
-    } else if (connection === 'open') {
+    }
+
+    if (connection === 'open') {
       currentQR = null;
       botStatus = 'BOT NYAMBUNG! GACOR!';
       console.log('NYAMBUNG! BOT ZUAN STORE GACOR!');
     }
   });
 
+  // ==========================================================
+  //  PESAN MASUK
+  // ==========================================================
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     try {
       if (type !== 'notify') return;
+
       const m = messages[0];
       if (!m.message) return;
       if (m.key.fromMe) return;
 
       const from = m.key.remoteJid;
-      const body = m.message.conversation
-        || m.message.extendedTextMessage?.text
-        || m.message.imageMessage?.caption
-        || m.message.videoMessage?.caption
-        || '';
+
+      const body =
+        m.message.conversation ||
+        m.message.extendedTextMessage?.text ||
+        m.message.imageMessage?.caption ||
+        m.message.videoMessage?.caption ||
+        '';
 
       console.log('📩 CHAT MASUK dari ' + from + ' : ' + body);
       if (!body) return;
 
       const senderName = m.pushName || 'Customer';
       const senderNum = from.split('@')[0];
+
       const reply = (text) => sock.sendMessage(from, { text: text }, { quoted: m });
+
       const lower = body.toLowerCase();
 
-      // === AUTO ORDER ===
+      // ------------------------------------------------------
+      //  AUTO ORDER - KALO ADA FORMAT NAMA: + PANEL:
+      // ------------------------------------------------------
       if (lower.includes('nama:') && lower.includes('panel:')) {
         await reply(
-`🔥 *ORDER MASUK BOSSKU!* 🔥
-━━━━━━━━━━━━━━━━━━
-✅ *STATUS: SEDANG DIPROSES* ⏳
-
-Yo ${senderName}! Order lu udah nyangkut di sistem gue nih! Gak bakal gue cuekin!
-
-📋 *DETAIL ORDER LU:*
-${body}
-
-━━━━━━━━━━━━━━━━━━
-💳 *NEXT STEP - JANGAN DI SKIP!*
-1. Ketik *.payment* - Liat cara bayar
-2. Transfer - Sesuai harga, jangan kurang!
-3. Kirim bukti TF - Di sini aja
-4. Tunggu 1-5 Menit - Panel langsung jadi! ⚡
-
-Sabar dikit ya, owner lagi ngeracik panel lu biar ngebut! 🚀
-Owner: wa.me/6281514262038`
+          '🔥 *ORDER MASUK BOSSKU!* 🔥\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '✅ *STATUS: SEDANG DIPROSES* ⏳\n' +
+          '\n' +
+          'Yo ' + senderName + '! Order lu udah nyangkut di sistem gue nih!\n' +
+          '\n' +
+          '📋 *DETAIL ORDER LU:*\n' +
+          body + '\n' +
+          '\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '💳 *NEXT STEP:*\n' +
+          '1. Ketik .payment - Liat cara bayar\n' +
+          '2. Transfer - Sesuai harga\n' +
+          '3. Kirim bukti TF - Di sini aja\n' +
+          '4. Tunggu 1-5 Menit - Panel langsung jadi! ⚡\n' +
+          '\n' +
+          'Owner: wa.me/6281514262038'
         );
+
         try {
           await sock.sendMessage(OWNER + '@s.whatsapp.net', {
             text:
-`🚨 *ADA ORDER BARU CUAN!* 🚨
-━━━━━━━━━━━━━━━━━━
-Dari: ${senderName} (${senderNum})
-Waktu: ${new Date().toLocaleString('id-ID')}
-
-📋 *FORMAT ORDER:*
-${body}
-
-Gas garap bang! Jangan sampe kabur!
-wa.me/${senderNum}`
+              '🚨 *ADA ORDER BARU CUAN!* 🚨\n' +
+              'Dari: ' + senderName + ' (' + senderNum + ')\n' +
+              'Waktu: ' + new Date().toLocaleString('id-ID') + '\n' +
+              '\n' +
+              '📋 *FORMAT ORDER:*\n' +
+              body + '\n' +
+              '\n' +
+              'Gas garap bang!\n' +
+              'wa.me/' + senderNum
           });
         } catch (e) {
           console.log('Gagal kirim ke owner', e);
@@ -156,353 +230,341 @@ wa.me/${senderNum}`
       }
 
       if (!body.startsWith('.')) return;
+
       const args = body.slice(1).trim().split(/ +/);
       const cmd = args.shift().toLowerCase();
+
       console.log('⚡ CMD: ' + cmd + ' dari ' + senderNum);
 
-      // === PING ===
+      // ------------------------------------------------------
+      //  .ping
+      // ------------------------------------------------------
       if (cmd === 'ping') {
-        return reply('⚡ *ZUAN STORE ONLINE BOS!* ⚡\n\n🏓 Pong! Bot masih idup, masih gacor!\nSpeed: Ngebut kaya RX King! 🔥');
+        return reply(
+          '⚡ *ZUAN STORE ONLINE BOS!* ⚡\n' +
+          '\n' +
+          '🏓 Pong! Bot masih idup, masih gacor!\n' +
+          'Speed: Ngebut kaya RX King! 🔥'
+        );
       }
 
-      // === MENU ===
+      // ------------------------------------------------------
+      //  .menu
+      // ------------------------------------------------------
       if (cmd === 'menu') {
         await reply(
-`╭━━━ *ZUAN STORE* ━━━╮
-┃ ⚡ *THE REAL PANEL STORE* ⚡
-╰━━━━━━━━━━━━━━━━━╯
-
-😈 *GAS PILIH, JANGAN CUMA LIAT!*
-
-🔥 *PANEL & HARGA*
-├ .listharga - Harga Panel Gacor
-├ .reseller - Jadi Sultan Panel
-├ .vps - VPS Murah Meriah
-├ .payment - Bayar Di Sini
-├ .garansi - Garansi Anti Rungkad
-└ .rules - Rules, Baca Biar Gak Kena Ban!
-
-🛒 *ORDER*
-├ .buy - Cara Order Anti Ribet
-└ .panel - Info Panel
-
-🎲 *FUN*
-├ .jodoh - Cek Jodoh Lu
-├ .quotes - Quotes Buat Status
-└ .ping - Cek Bot Masih Idup?
-
-━━━━━━━━━━━━━━━━━━
-👑 *OWNER:* wa.me/6281514262038
-💬 *GAS CHAT, JANGAN MALU-MALU!*`
+          '╭━━━ *ZUAN STORE* ━━━╮\n' +
+          '┃ ⚡ *THE REAL PANEL STORE* ⚡\n' +
+          '╰━━━━━━━━━━━━━━━━━╯\n' +
+          '\n' +
+          '😈 *GAS PILIH, JANGAN CUMA LIAT!*\n' +
+          '\n' +
+          '🔥 *PANEL & HARGA*\n' +
+          '├ .listharga - Harga Panel Gacor\n' +
+          '├ .reseller - Jadi Sultan Panel\n' +
+          '├ .vps - VPS Murah Meriah\n' +
+          '├ .payment - Bayar Di Sini\n' +
+          '├ .garansi - Garansi Anti Rungkad\n' +
+          '└ .rules - Rules, Baca Biar Gak Kena Ban!\n' +
+          '\n' +
+          '🛒 *ORDER*\n' +
+          '├ .buy - Cara Order Anti Ribet\n' +
+          '└ .panel - Info Panel\n' +
+          '\n' +
+          '🎲 *FUN*\n' +
+          '├ .jodoh - Cek Jodoh Lu\n' +
+          '├ .quotes - Quotes Buat Status\n' +
+          '└ .ping - Cek Bot Masih Idup?\n' +
+          '\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '👑 *OWNER:* wa.me/6281514262038'
         );
+
         return reply(
-`👑 *MAU JADI SULTAN? JADI RESELLER!* 👑
-
-Ketik *.reseller* sekarang!
-
-Reseller - 10K
-Admin - 20K
-Partner - 30K
-Owner - 45K
-
-Modal kecil, cuan gede! Gas! 🔥`
+          '👑 *MAU JADI SULTAN? JADI RESELLER!* 👑\n' +
+          '\n' +
+          'Ketik .reseller sekarang!\n' +
+          '\n' +
+          'Reseller - 10K\n' +
+          'Admin - 20K\n' +
+          'Partner - 30K\n' +
+          'Owner - 45K\n' +
+          '\n' +
+          'Modal kecil, cuan gede! Gas! 🔥'
         );
       }
 
-      // === RESELLER / ROLE ===
+      // ------------------------------------------------------
+      //  .reseller / .role / .legal
+      // ------------------------------------------------------
       if (cmd === 'role' || cmd === 'rolepanel' || cmd === 'reseller' || cmd === 'resellerpanel' || cmd === 'legal') {
         return reply(
-`👑 *ROLE PANEL LEGAL - ZUAN STORE* 👑
-━━━━━━━━━━━━━━━━━━
-*BUKAN PANEL ABAL-ABAL, INI LEGAL 100%!*
-
-💎 RESELLER - *10K*
-💎 ADMIN PANEL - *20K*
-💎 PARTNER PANEL - *30K*
-💎 OWNER PANEL - *45K*
-
-━━━━━━━━━━━━━━━━━━
-*<> BENEFIT GILA-GILAAN <>*
-
-🔥 *RESELLER LEGAL* 🔥
-— Bisa Jualan Panel 1GB - UNLI
-— Create Panel Sepuasnya, Gak Ada Rem!
-— Free VPS x1
-— Dijamin Diurus 100%, Gak Ditinggal!
-— PTPT Perbulan, Cuan Terus!
-
-😈 *ADMIN LEGAL* 😈
-— Akses Open Reseller Panel
-— Akses PLTA & PLTC
-— Akses Create Panel 1GB - UNLI
-— Create Panel Sepuasnya
-— Free VPS x1
-— Dijamin Diurus 100%
-— PTPT Perbulan
-
-🚀 *PARTNER LEGAL* 🚀
-— Akses Open Admin Panel Legal
-— Akses Open Reseller Panel Legal
-— Akses PLTA & PLTC
-— Akses Create Panel 1GB - UNLI
-— Create Panel Sepuasnya
-— Free VPS x2
-— Dijamin Diurus 100%
-— PTPT Perbulan
-
-👑 *OWNER LEGAL - RAJA NYA!* 👑
-— Akses PENUH Ke Server, Lu Yang Pegang!
-— Akses Open Partner Legal
-— Akses Open Admin Panel Legal
-— Akses Open Reseller Legal
-— Akses Create Panel 1GB - UNLI
-— Create Panel Sepuasnya
-— Free VPS x3
-— Dijamin Diurus 100%
-— PTPT Perbulan
-
-━━━━━━━━━━━━━━━━━━
-*<> SPESIFIKASI SERVER - MONSTER! <>*
-
-🖥️ *SERVER V1 - BEST!*
-- OS: Ubuntu 24.04.3 x86_64
-- CPU: Intel Xeon E5-2690 v4 @ 2.50GHz (16 core)
-- RAM: 64GB - GEDE PARAH!
-- DISK: 540 GB NVMe - Ngebut!
-- NETWORK: 1 Gbps 🚀
-- LOCATION: Indonesia 🇮🇩
-
-🖥️ *SERVER V2 - GACOR!*
-- OS: Ubuntu 24.04.3 x86_64
-- CPU: AMD EPYC-Turin (8) 2.84 GHz
-- RAM: 32GB
-- DISK: 480GB NVMe
-- NETWORK: 1 Gbps 🚀
-
-━━━━━━━━━━━━━━━━━━
-Gas join? Chat Owner sekarang!
-👑 wa.me/6281514262038`
+          '👑 *ROLE PANEL LEGAL - ZUAN STORE* 👑\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '*BUKAN PANEL ABAL-ABAL, INI LEGAL 100%!*\n' +
+          '\n' +
+          '💎 RESELLER - *10K*\n' +
+          '💎 ADMIN PANEL - *20K*\n' +
+          '💎 PARTNER PANEL - *30K*\n' +
+          '💎 OWNER PANEL - *45K*\n' +
+          '\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '*<> BENEFIT GILA-GILAAN <>*\n' +
+          '\n' +
+          '🔥 *RESELLER LEGAL* 🔥\n' +
+          '— Bisa Jualan Panel 1GB - UNLI\n' +
+          '— Create Panel Sepuasnya\n' +
+          '— Free VPS x1\n' +
+          '— Dijamin Diurus 100%\n' +
+          '— PTPT Perbulan\n' +
+          '\n' +
+          '😈 *ADMIN LEGAL* 😈\n' +
+          '— Akses Open Reseller Panel\n' +
+          '— Akses PLTA & PLTC\n' +
+          '— Akses Create Panel 1GB - UNLI\n' +
+          '— Create Panel Sepuasnya\n' +
+          '— Free VPS x1\n' +
+          '— Dijamin Diurus 100%\n' +
+          '— PTPT Perbulan\n' +
+          '\n' +
+          '🚀 *PARTNER LEGAL* 🚀\n' +
+          '— Akses Open Admin Panel Legal\n' +
+          '— Akses Open Reseller Panel Legal\n' +
+          '— Akses PLTA & PLTC\n' +
+          '— Akses Create Panel 1GB - UNLI\n' +
+          '— Create Panel Sepuasnya\n' +
+          '— Free VPS x2\n' +
+          '— Dijamin Diurus 100%\n' +
+          '— PTPT Perbulan\n' +
+          '\n' +
+          '👑 *OWNER LEGAL - RAJA NYA!* 👑\n' +
+          '— Akses PENUH Ke Server\n' +
+          '— Akses Open Partner Legal\n' +
+          '— Akses Open Admin Panel Legal\n' +
+          '— Akses Open Reseller Legal\n' +
+          '— Akses Create Panel 1GB - UNLI\n' +
+          '— Create Panel Sepuasnya\n' +
+          '— Free VPS x3\n' +
+          '— Dijamin Diurus 100%\n' +
+          '— PTPT Perbulan\n' +
+          '\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '*<> SPESIFIKASI SERVER - MONSTER! <>*\n' +
+          '\n' +
+          '🖥️ *SERVER V1*\n' +
+          '- OS: Ubuntu 24.04.3 x86_64\n' +
+          '- CPU: Intel Xeon E5-2690 v4 @ 2.50GHz (16 core)\n' +
+          '- RAM: 64GB\n' +
+          '- DISK: 540 GB NVMe\n' +
+          '- NETWORK: 1 Gbps\n' +
+          '- LOCATION: Indonesia\n' +
+          '\n' +
+          '🖥️ *SERVER V2*\n' +
+          '- OS: Ubuntu 24.04.3 x86_64\n' +
+          '- CPU: AMD EPYC-Turin (8) 2.84 GHz\n' +
+          '- RAM: 32GB\n' +
+          '- DISK: 480GB NVMe\n' +
+          '- NETWORK: 1 Gbps\n' +
+          '\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          'Gas join? Chat Owner!\n' +
+          '👑 wa.me/6281514262038'
         );
       }
 
-      // === LIST HARGA ===
+      // ------------------------------------------------------
+      //  .listharga
+      // ------------------------------------------------------
       if (cmd === 'listharga') {
         return reply(
-`⚡ *LIST HARGA PANEL - ZUAN STORE* ⚡
-━━━━━━━━━━━━━━━━━━
-*HARGA MURAH, KUALITAS SULTAN!*
-
-🔥 *PANEL PRIVATE - ANTI LAG!*
-━━━━━━━━━━━━━━━━━━
-⚡ 1GB - Rp 4.000 /bln
-⚡ 2GB - Rp 6.000 /bln
-⚡ 3GB - Rp 8.000 /bln
-⚡ 4GB - Rp 10.000 /bln
-⚡ 5GB - Rp 12.000 /bln
-⚡ 6GB - Rp 14.000 /bln
-⚡ 7GB - Rp 16.000 /bln
-⚡ 8GB - Rp 18.000 /bln
-⚡ 9GB - Rp 20.000 /bln
-⚡ 10GB - Rp 22.000 /bln
-👑 UNLI - Rp 25.000 /bln
-✅ Garansi: 30 Hari - Full!
-
-💣 *PANEL PUBLIC - MURAH MERIAH!*
-━━━━━━━━━━━━━━━━━━
-💥 1GB - Rp 2.000 /bln
-💥 2GB - Rp 4.000 /bln
-💥 3GB - Rp 6.000 /bln
-💥 4GB - Rp 8.000 /bln
-💥 5GB - Rp 10.000 /bln
-👑 UNLI - Rp 15.000 /bln
-✅ Garansi: 15 Hari
-
-━━━━━━━━━━━━━━━━━━
-🖥️ *SPEK DEWA:*
-CPU: 100% - 200%
-RAM: Sesuai GB
-Server: Singapore / Germany
-Uptime: 99.9% - Gak Pernah Tidur!
-
-Mau jadi Reseller? Ketik *.reseller*
-Owner: wa.me/6281514262038`
+          '⚡ *LIST HARGA PANEL - ZUAN STORE* ⚡\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '*HARGA MURAH, KUALITAS SULTAN!*\n' +
+          '\n' +
+          '🔥 *PANEL PRIVATE - ANTI LAG!*\n' +
+          '⚡ 1GB - Rp 4.000 /bln\n' +
+          '⚡ 2GB - Rp 6.000 /bln\n' +
+          '⚡ 3GB - Rp 8.000 /bln\n' +
+          '⚡ 4GB - Rp 10.000 /bln\n' +
+          '⚡ 5GB - Rp 12.000 /bln\n' +
+          '⚡ 6GB - Rp 14.000 /bln\n' +
+          '⚡ 7GB - Rp 16.000 /bln\n' +
+          '⚡ 8GB - Rp 18.000 /bln\n' +
+          '⚡ 9GB - Rp 20.000 /bln\n' +
+          '⚡ 10GB - Rp 22.000 /bln\n' +
+          '👑 UNLI - Rp 25.000 /bln\n' +
+          '✅ Garansi: 30 Hari\n' +
+          '\n' +
+          '💣 *PANEL PUBLIC - MURAH MERIAH!*\n' +
+          '💥 1GB - Rp 2.000 /bln\n' +
+          '💥 2GB - Rp 4.000 /bln\n' +
+          '💥 3GB - Rp 6.000 /bln\n' +
+          '💥 4GB - Rp 8.000 /bln\n' +
+          '💥 5GB - Rp 10.000 /bln\n' +
+          '👑 UNLI - Rp 15.000 /bln\n' +
+          '✅ Garansi: 15 Hari\n' +
+          '\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '🖥️ *SPEK DEWA:* CPU 100% - 200% | Server Singapore / Germany | Uptime 99.9%\n' +
+          '\n' +
+          'Mau jadi Reseller? Ketik .reseller\n' +
+          'Owner: wa.me/6281514262038'
         );
       }
 
-      // === PAYMENT ===
+      // ------------------------------------------------------
+      //  .payment
+      // ------------------------------------------------------
       if (cmd === 'payment') {
         return reply(
-`💳 *PEMBAYARAN - ZUAN STORE* 💳
-━━━━━━━━━━━━━━━━━━
-*TF DULU, BARU PANEL JADI!*
-
-💸 DANA: *085872257850*
-💸 GOPAY: *085872257850*
-📱 QRIS: *Chat Owner*
-
-━━━━━━━━━━━━━━━━━━
-⚠️ *ABIS TF WAJIB:*
-Kirim bukti TF di sini!
-Jangan lupa, biar langsung diproses!
-
-Owner: wa.me/6281514262038
-*GAS TF, GAS JADI!* 🔥`
+          '💳 *PEMBAYARAN - ZUAN STORE* 💳\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '*TF DULU, BARU PANEL JADI!*\n' +
+          '\n' +
+          '💸 DANA: *085872257850*\n' +
+          '💸 GOPAY: *085872257850*\n' +
+          '📱 QRIS: *Chat Owner*\n' +
+          '\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '⚠️ *ABIS TF WAJIB:* Kirim bukti TF di sini!\n' +
+          'Owner: wa.me/6281514262038\n' +
+          '*GAS TF, GAS JADI!* 🔥'
         );
       }
 
-      // === GARANSI ===
+      // ------------------------------------------------------
+      //  .garansi
+      // ------------------------------------------------------
       if (cmd === 'garansi') {
         return reply(
-`🛡️ *GARANSI - ZUAN STORE* 🛡️
-━━━━━━━━━━━━━━━━━━
-*KLAIM GAMPANG, GAK RIBET!*
-
-🔥 PANEL PRIVATE: *Garansi 30 Hari*
-💣 PANEL PUBLIC: *Garansi 15 Hari*
-
-━━━━━━━━━━━━━━━━━━
-*SYARAT KLAIM - GAMPANG:*
-✓ Panel kehapus / error dari server
-✓ Screenshot bukti
-✓ Chat owner langsung
-
-Owner: wa.me/6281514262038
-*TENANG, PANEL LU AMAN DI TANGAN GUE!* 😎`
+          '🛡️ *GARANSI - ZUAN STORE* 🛡️\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '🔥 PANEL PRIVATE: *Garansi 30 Hari*\n' +
+          '💣 PANEL PUBLIC: *Garansi 15 Hari*\n' +
+          '\n' +
+          'Syarat: Panel kehapus / error dari server + Screenshot bukti + Chat owner\n' +
+          'Owner: wa.me/6281514262038'
         );
       }
 
-      // === RULES ===
+      // ------------------------------------------------------
+      //  .rules
+      // ------------------------------------------------------
       if (cmd === 'rules') {
         return reply(
-`📜 *RULES - ZUAN STORE* 📜
-━━━━━━━━━━━━━━━━━━
-*BACA DULU, JANGAN LANGSUNG NGEYEL!*
-
-1. ❌ No Spam / No Rusuh - Sopan dikit!
-2. ❌ Dilarang Share Panel Ke Orang Lain
-3. ❌ Dilarang DDOS / Mining / Abuse - Auto Ban!
-4. ❌ Garansi Hangus Jika Melanggar Rules
-5. ✅ Wajib Kirim Bukti TF Sebelum Panel Dibuat
-
-━━━━━━━━━━━━━━━━━━
-*LANGGAR = BAN TANPA REFUND!*
-*NO DRAMA, NO BACOT!* 😈`
+          '📜 *RULES - ZUAN STORE* 📜\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '1. No Spam / No Rusuh\n' +
+          '2. Dilarang Share Panel Ke Orang Lain\n' +
+          '3. Dilarang DDOS / Mining / Abuse - Auto Ban!\n' +
+          '4. Garansi Hangus Jika Melanggar Rules\n' +
+          '5. Wajib Kirim Bukti TF Sebelum Panel Dibuat\n' +
+          '\n' +
+          '*LANGGAR = BAN TANPA REFUND! NO DRAMA!* 😈'
         );
       }
 
-      // === VPS ===
+      // ------------------------------------------------------
+      //  .vps
+      // ------------------------------------------------------
       if (cmd === 'vps') {
         return reply(
-`🖥️ *LIST VPS - ZUAN STORE* 🖥️
-━━━━━━━━━━━━━━━━━━
-*<> PROMO DAY ONE <>*
-*HARGA GILA, STOK TERBATAS!*
-
-🔥 VPS DIGITALOCEAN
-START *3K AN* - Murah Parah!
-
-🔥 VPS LINODE
-START *6K AN*
-
-💣 DIGITALOCEAN 10 DROP
-HANYA *35K* - Gas Borong!
-
-💣 DIGITALOCEAN 3 DROP
-HANYA *25K*
-
-💎 LINODE FT $100/$500
-HANYA *60K* - Sultan Punya!
-
-━━━━━━━━━━━━━━━━━━
-*ORDER? DIMARI!*
-Owner: wa.me/6281514262038
-Ketik *.payment* buat pembayaran!
-*SIAPA CEPAT DIA DAPAT!* 🚀`
+          '🖥️ *LIST VPS - ZUAN STORE* 🖥️\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '*<> PROMO DAY ONE <>*\n' +
+          '\n' +
+          '🔥 VPS DIGITALOCEAN START *3K AN*\n' +
+          '🔥 VPS LINODE START *6K AN*\n' +
+          '💣 DIGITALOCEAN 10 DROP HANYA *35K*\n' +
+          '💣 DIGITALOCEAN 3 DROP HANYA *25K*\n' +
+          '💎 LINODE FT $100/$500 HANYA *60K*\n' +
+          '\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '*ORDER? DIMARI!*\n' +
+          'Owner: wa.me/6281514262038\n' +
+          'Ketik .payment buat pembayaran!\n' +
+          '*SIAPA CEPAT DIA DAPAT!* 🚀'
         );
       }
 
-      // === BUY / ORDER ===
+      // ------------------------------------------------------
+      //  .buy / .order
+      // ------------------------------------------------------
       if (cmd === 'buy' || cmd === 'order') {
         return reply(
-`🛒 *CARA ORDER - GAMPANG PARAH!* 🛒
-━━━━━━━━━━━━━━━━━━
-
-1. Pilih panel yang lu mau
-Contoh: *5GB Private* - Gacor!
-
-2. Copy format ini, isi, kirim ke sini:
-
-*FORMAT ORDER:*
-Nama:
-Panel: 5GB Private
-No WA:
-
-3. Transfer ke *.payment*
-4. Kirim bukti TF
-5. *Panel langsung jadi! 1-5 Menit!* ⚡
-
-━━━━━━━━━━━━━━━━━━
-*LANGSUNG GAS!*
-Owner: wa.me/6281514262038
-
-Ketik *.listharga* - Liat harga panel
-Ketik *.reseller* - Jadi Reseller
-Ketik *.vps* - Liat harga VPS
-*JANGAN CUMA DILIHAT, DIBELI!* 😈`
+          '🛒 *CARA ORDER - GAMPANG PARAH!* 🛒\n' +
+          '━━━━━━━━━━━━━━━━━━\n' +
+          '1. Pilih panel yang lu mau Contoh: *5GB Private*\n' +
+          '2. Copy format ini:\n' +
+          '\n' +
+          '*FORMAT ORDER:*\n' +
+          'Nama:\n' +
+          'Panel: 5GB Private\n' +
+          'No WA:\n' +
+          '\n' +
+          '3. Transfer ke .payment\n' +
+          '4. Kirim bukti TF\n' +
+          '5. *Panel langsung jadi! 1-5 Menit!* ⚡\n' +
+          '\n' +
+          'Owner: wa.me/6281514262038\n' +
+          'Ketik .listharga / .reseller / .vps'
         );
       }
 
-      // === PANEL ===
+      // ------------------------------------------------------
+      //  .panel
+      // ------------------------------------------------------
       if (cmd === 'panel') {
         return reply(
-`⚡ *INFO PANEL - ZUAN STORE* ⚡
-━━━━━━━━━━━━━━━━━━
-Panel Pterodactyl, Anti Lag, Server Singapore / Germany.
-Ngebut, Stabil, Gak Pake Drama!
-
-Cek Harga: *.listharga*
-Jadi Sultan: *.reseller*
-Cek VPS: *.vps*
-Bayar: *.payment*
-Order: wa.me/6281514262038
-
-*PANEL MURAH, KUALITAS GAK MURAHAN!* 🔥`
+          '⚡ *INFO PANEL - ZUAN STORE* ⚡\n' +
+          'Panel Pterodactyl, Anti Lag, Server Singapore / Germany.\n' +
+          'Cek Harga: .listharga\n' +
+          'Jadi Sultan: .reseller\n' +
+          'Cek VPS: .vps\n' +
+          'Bayar: .payment\n' +
+          'Order: wa.me/6281514262038'
         );
       }
 
-      // === JODOH ===
+      // ------------------------------------------------------
+      //  .jodoh
+      // ------------------------------------------------------
       if (cmd === 'jodoh') {
         const persen = Math.floor(Math.random() * 100);
+        let pesan = '';
+        if (persen > 70) {
+          pesan = '🔥 WAH GILA! JODOH BANGET NIH! GAS NIKAH!';
+        } else if (persen > 40) {
+          pesan = '😏 LUMAYAN! Perjuangin dikit lagi!';
+        } else {
+          pesan = '💀 WADUH! Kayanya bukan jodoh lu nih...';
+        }
         return reply(
-`💘 *CEK JODOH - ZUAN STORE* 💘
-━━━━━━━━━━━━━━━━━━
-Kecocokan Lu: *${persen}%*
-
-${persen > 70 ? '🔥 WAH GILA! JODOH BANGET NIH! GAS NIKAH! Gas halalin sekarang!' : persen > 40 ? '😏 LUMAYAN! Perjuangin dikit lagi, jangan nyerah! Gas PDKT!' : '💀 WADUH! Kayanya bukan jodoh lu nih... Cari yang lain aja, masih banyak!'}
-
-*Udah cek jodoh, sekarang cek panel!*
-Ketik *.listharga*`
+          '💘 *CEK JODOH - ZUAN STORE* 💘\n' +
+          'Kecocokan Lu: *' + persen + '%*\n' +
+          pesan + '\n' +
+          '\n' +
+          'Ketik .listharga buat cek panel!'
         );
       }
 
-      // === QUOTES ===
+      // ------------------------------------------------------
+      //  .quotes
+      // ------------------------------------------------------
       if (cmd === 'quotes') {
         const q = [
           'Jangan menyerah, panel murah masih banyak. Yang nyerah, yang rungkad!',
-          'Sukses itu butuh proses, bukan protes. Gas kerja, jangan banyak ngeluh!',
-          'Hidup itu pilihan, pilih panel di Zuan Store. Dijamin gak nyesel!',
+          'Sukses itu butuh proses, bukan protes. Gas kerja!',
+          'Hidup itu pilihan, pilih panel di Zuan Store!',
           'Kerja keras + Doa = Sukses. Cuan ngalir terus!',
-          'Jangan takut gagal, takutlah jadi beban keluarga. Gas bangkit!',
-          'Modal 2rb udah bisa punya panel. Alasan apa lagi buat gak mulai?',
-          'Orang sukses itu yang mulai duluan, bukan yang nunggu-nunggu. Gas!',
+          'Modal 2rb udah bisa punya panel. Gas mulai!'
         ];
+        const randomQ = q[Math.floor(Math.random() * q.length)];
         return reply(
-`💬 *QUOTES BADASS* 💬
-━━━━━━━━━━━━━━━━━━
-"${q[Math.floor(Math.random() * q.length)]}"
-
-- Zuan Store 🔥
-Ketik *.quotes* lagi buat quotes baru!`
+          '💬 *QUOTES BADASS* 💬\n' +
+          '"' + randomQ + '"\n' +
+          '\n' +
+          '- Zuan Store 🔥'
         );
       }
 
