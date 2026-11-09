@@ -1,6 +1,7 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
+const fs = require('fs');
 
 const OWNER = '6281514262038';
 
@@ -9,20 +10,40 @@ async function start(){
   const sock = makeWASocket({
     auth: state,
     logger: pino({ level: 'silent' }),
-    printQRInTerminal: true,
+    // printQRInTerminal DIHAPUS - udah deprecated, bikin crash!
     browser: ['Zuan Store', 'Chrome', '1.0']
   });
 
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect } = update;
+    const { connection, lastDisconnect, qr } = update;
+
+    // === FIX QR - MUNCUL DI LOG FADEHOST! ===
+    if(qr){
+      console.log('📱 SCAN QR INI DI WA LU BANG!');
+      qrcode.generate(qr, { small: true });
+      console.log('QR DI ATAS! Buka WA > Linked Device > Link a Device > Scan!');
+    }
+
     if(connection === 'close'){
-      const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('Koneksi putus, reconnect...', shouldReconnect);
-      if(shouldReconnect) start();
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      console.log('Koneksi putus, kode:', statusCode);
+
+      // Kalo ke-logout (401 / loggedOut) -> Hapus session, minta QR baru, JANGAN MATI!
+      if(statusCode === DisconnectReason.loggedOut || statusCode === 401){
+        console.log('⚠️ SESSION EXPIRED! Hapus session lama, minta QR baru...');
+        try{ fs.rmSync('session', { recursive: true, force: true }); } catch(e){}
+        console.log('Session dihapus! Restart 3 detik, nanti scan QR baru di log!');
+        setTimeout(() => start(), 3000);
+        return;
+      }
+
+      // Kalo putus biasa, reconnect terus, jangan pernah mati!
+      console.log('Reconnect lagi dalam 3 detik...');
+      setTimeout(() => start(), 3000);
     } else if(connection === 'open'){
-      console.log('✅ NYAMBUNG!');
+      console.log('✅ NYAMBUNG! BOT ZUAN STORE GACOR!');
     }
   });
 
@@ -181,19 +202,19 @@ Modal kecil, cuan gede! Gas! 🔥`
 *<> SPESIFIKASI SERVER - MONSTER! <>*
 
 🖥️ *SERVER V1 - BEST!*
-• OS: Ubuntu 24.04.3 x86_64
-• CPU: Intel Xeon E5-2690 v4 @ 2.50GHz (16 core)
-• RAM: 64GB - GEDE PARAH!
-• DISK: 540 GB NVMe - Ngebut!
-• NETWORK: 1 Gbps 🚀
-• LOCATION: Indonesia 🇮🇩
+- OS: Ubuntu 24.04.3 x86_64
+- CPU: Intel Xeon E5-2690 v4 @ 2.50GHz (16 core)
+- RAM: 64GB - GEDE PARAH!
+- DISK: 540 GB NVMe - Ngebut!
+- NETWORK: 1 Gbps 🚀
+- LOCATION: Indonesia 🇮🇩
 
 🖥️ *SERVER V2 - GACOR!*
-• OS: Ubuntu 24.04.3 x86_64
-• CPU: AMD EPYC-Turin (8) 2.84 GHz
-• RAM: 32GB
-• DISK: 480GB NVMe
-• NETWORK: 1 Gbps 🚀
+- OS: Ubuntu 24.04.3 x86_64
+- CPU: AMD EPYC-Turin (8) 2.84 GHz
+- RAM: 32GB
+- DISK: 480GB NVMe
+- NETWORK: 1 Gbps 🚀
 
 ━━━━━━━━━━━━━━━━━━
 Gas join? Chat Owner sekarang!
@@ -415,5 +436,7 @@ Ketik *.quotes* lagi buat quotes baru!`
 
   });
 }
+
+start();
 
 start();
