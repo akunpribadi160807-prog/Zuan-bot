@@ -1,57 +1,64 @@
-// ZUAN STORE - ANTI CRASH VERSION
-// Cuma butuh: @whiskeysockets/baileys doang!
 let makeWASocket, useMultiFileAuthState, DisconnectReason;
-try{
+try {
   ({ default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys'));
-} catch(e){
-  console.log('❌ ERROR: Baileys belum ke-install! Cek package.json!');
-  console.log(e.message);
+} catch (e) {
+  console.log('ERROR Baileys belum ke-install!', e.message);
   process.exit(1);
 }
 
-const fs = require('fs');
 const http = require('http');
-
 const OWNER = '6281514262038';
 
-// Logger palsu biar gak butuh pino - ANTI ERROR MODULE NOT FOUND!
 const logger = {
   level: 'silent',
   child: () => logger,
-  trace: ()=>{}, debug: ()=>{}, info: ()=>{}, warn: ()=>{}, error: ()=>{}, fatal: ()=>{}
+  trace: () => {},
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  fatal: () => {}
 };
 
+// === CUMA QR, NO PAIRING! ===
 let currentQR = null;
-let currentPairing = null;
-let botStatus = '⏳ Lagi nyari QR... Tunggu bentar...';
+let botStatus = 'Lagi nyari QR... Tunggu bentar...';
 
 const server = http.createServer((req, res) => {
-  const qrImg = currentQR 
+  const qrImg = currentQR
     ? `<img src="https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(currentQR)}" style="border:10px solid white;border-radius:20px;">`
     : `<h2 style="color:white;">${botStatus}</h2>`;
-  const pairingHtml = currentPairing
-    ? `<div style="background:#25D366;color:white;padding:15px;border-radius:15px;margin-top:20px;font-size:22px;font-weight:bold;">🔥 PAIRING CODE: ${currentPairing}<br><span style="font-size:14px;font-weight:normal;">WA > Perangkat Tertaut > Tautkan dengan nomor telepon > Masukin kode ini!</span></div>`
-    : ``;
+
   const html = `
   <!DOCTYPE html>
-  <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZUAN STORE - SCAN QR</title><meta http-equiv="refresh" content="5"></head>
+  <html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>ZUAN STORE - SCAN QR</title>
+    <meta http-equiv="refresh" content="5">
+  </head>
   <body style="background:#0f0f0f;font-family:sans-serif;text-align:center;padding:20px;color:white;">
     <h1 style="font-size:28px;">⚡ ZUAN STORE ⚡</h1>
     <p style="color:#aaa;">Status: ${botStatus}</p>
     <p>Scan QR di bawah ini pake WA lu!</p>
     ${qrImg}
-    ${pairingHtml}
-    <p style="color:#888;margin-top:20px;font-size:13px;">Halaman ini auto-refresh tiap 5 detik<br>WA > Titik 3 > Perangkat Tertaut > Tautkan Perangkat > Scan QR ini</p>
+    <p style="color:#888;margin-top:20px;font-size:13px;">
+      Halaman ini auto-refresh tiap 5 detik<br>
+      WA > Titik 3 > Perangkat Tertaut > Tautkan Perangkat > Scan QR ini
+    </p>
     <p style="color:#25D366;font-weight:bold;">Owner: wa.me/6281514262038</p>
-  </body></html>`;
+  </body>
+  </html>`;
+
   res.writeHead(200, { 'Content-Type': 'text/html' });
   res.end(html);
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => console.log('🌐 Web QR jalan di port ' + PORT + ' - Buka https://zuan-bot.fadehost.app'));
+server.listen(PORT, () => console.log('Web QR jalan di port ' + PORT));
 
-async function start(){
+async function start() {
   const { state, saveCreds } = await useMultiFileAuthState('session');
   const sock = makeWASocket({
     auth: state,
@@ -61,58 +68,54 @@ async function start(){
 
   sock.ev.on('creds.update', saveCreds);
 
-  if(!state.creds.registered){
-    setTimeout(async () => {
-      try{
-        const code = await sock.requestPairingCode(OWNER);
-        currentPairing = code;
-        botStatus = 'Pairing Code siap! Cek web!';
-        console.log('🔥 PAIRING CODE: ' + code + ' - Cek juga di https://zuan-bot.fadehost.app');
-      }catch(e){ console.log('Gagal pairing:', e.message); }
-    }, 3000);
-  }
-
+  // NO PAIRING CODE! NO SOCK.END! NO HAPUS SESSION!
+  // Biar bot yang udah nyambung gak dimatiin!
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update;
-    if(qr){
+
+    if (qr) {
       currentQR = qr;
-      currentPairing = null;
-      botStatus = '✅ QR BARU MUNCUL! Buka https://zuan-bot.fadehost.app & scan sekarang!';
-      console.log('📱 QR BARU! Buka https://zuan-bot.fadehost.app buat scan!');
+      botStatus = 'QR BARU MUNCUL! Buka https://zuan-bot.fadehost.app & scan!';
+      console.log('QR BARU! Buka https://zuan-bot.fadehost.app');
     }
-    if(connection === 'close'){
+
+    if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       console.log('Koneksi putus, kode:', statusCode);
-      if(statusCode === DisconnectReason.loggedOut || statusCode === 401){
-        console.log('⚠️ SESSION EXPIRED! Hapus session...');
-        try{ fs.rmSync('session', { recursive: true, force: true }); } catch(e){}
-        currentQR = null;
-        botStatus = 'Session expired, lagi bikin QR baru...';
-        setTimeout(() => start(), 3000);
-        return;
-      }
-      botStatus = 'Reconnect...';
-      setTimeout(() => start(), 3000);
-    } else if(connection === 'open'){
+      botStatus = 'Reconnect... Tunggu bentar, jangan scan ulang dulu!';
+      setTimeout(() => start(), 5000);
+    } else if (connection === 'open') {
       currentQR = null;
-      currentPairing = null;
-      botStatus = '✅ BOT NYAMBUNG! GACOR!';
-      console.log('✅ NYAMBUNG! BOT ZUAN STORE GACOR!');
+      botStatus = 'BOT NYAMBUNG! GACOR!';
+      console.log('NYAMBUNG! BOT ZUAN STORE GACOR!');
     }
   });
 
-  sock.ev.on('messages.upsert', async ({ messages }) => {
-    const m = messages[0];
-    if(!m.message || m.key.fromMe) return;
-    const from = m.key.remoteJid;
-    const body = m.message.conversation || m.message.extendedTextMessage?.text || '';
-    const senderName = m.pushName || 'Customer';
-    const senderNum = from.split('@')[0];
-    const reply = (text) => sock.sendMessage(from, { text: text }, { quoted: m });
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    try {
+      if (type !== 'notify') return;
+      const m = messages[0];
+      if (!m.message) return;
+      if (m.key.fromMe) return;
 
-    const lower = body.toLowerCase();
-    if(lower.includes('nama:') && lower.includes('panel:')){
-      await reply(
+      const from = m.key.remoteJid;
+      const body = m.message.conversation
+        || m.message.extendedTextMessage?.text
+        || m.message.imageMessage?.caption
+        || m.message.videoMessage?.caption
+        || '';
+
+      console.log('📩 CHAT MASUK dari ' + from + ' : ' + body);
+      if (!body) return;
+
+      const senderName = m.pushName || 'Customer';
+      const senderNum = from.split('@')[0];
+      const reply = (text) => sock.sendMessage(from, { text: text }, { quoted: m });
+      const lower = body.toLowerCase();
+
+      // === AUTO ORDER ===
+      if (lower.includes('nama:') && lower.includes('panel:')) {
+        await reply(
 `🔥 *ORDER MASUK BOSSKU!* 🔥
 ━━━━━━━━━━━━━━━━━━
 ✅ *STATUS: SEDANG DIPROSES* ⏳
@@ -131,9 +134,10 @@ ${body}
 
 Sabar dikit ya, owner lagi ngeracik panel lu biar ngebut! 🚀
 Owner: wa.me/6281514262038`
-      );
-      try{
-        await sock.sendMessage(OWNER + '@s.whatsapp.net', { text:
+        );
+        try {
+          await sock.sendMessage(OWNER + '@s.whatsapp.net', {
+            text:
 `🚨 *ADA ORDER BARU CUAN!* 🚨
 ━━━━━━━━━━━━━━━━━━
 Dari: ${senderName} (${senderNum})
@@ -144,21 +148,26 @@ ${body}
 
 Gas garap bang! Jangan sampe kabur!
 wa.me/${senderNum}`
-        });
-      } catch(e){ console.log('Gagal kirim ke owner', e); }
-      return;
-    }
+          });
+        } catch (e) {
+          console.log('Gagal kirim ke owner', e);
+        }
+        return;
+      }
 
-    if(!body.startsWith('.')) return;
-    const args = body.slice(1).trim().split(/ +/);
-    const cmd = args.shift().toLowerCase();
+      if (!body.startsWith('.')) return;
+      const args = body.slice(1).trim().split(/ +/);
+      const cmd = args.shift().toLowerCase();
+      console.log('⚡ CMD: ' + cmd + ' dari ' + senderNum);
 
-    if(cmd==='ping'){
-      return reply('⚡ *ZUAN STORE ONLINE BOS!* ⚡\n\n🏓 Pong! Bot masih idup, masih gacor!\nSpeed: Ngebut kaya RX King! 🔥');
-    }
+      // === PING ===
+      if (cmd === 'ping') {
+        return reply('⚡ *ZUAN STORE ONLINE BOS!* ⚡\n\n🏓 Pong! Bot masih idup, masih gacor!\nSpeed: Ngebut kaya RX King! 🔥');
+      }
 
-    if(cmd==='menu'){
-      await reply(
+      // === MENU ===
+      if (cmd === 'menu') {
+        await reply(
 `╭━━━ *ZUAN STORE* ━━━╮
 ┃ ⚡ *THE REAL PANEL STORE* ⚡
 ╰━━━━━━━━━━━━━━━━━╯
@@ -185,8 +194,8 @@ wa.me/${senderNum}`
 ━━━━━━━━━━━━━━━━━━
 👑 *OWNER:* wa.me/6281514262038
 💬 *GAS CHAT, JANGAN MALU-MALU!*`
-      );
-      return reply(
+        );
+        return reply(
 `👑 *MAU JADI SULTAN? JADI RESELLER!* 👑
 
 Ketik *.reseller* sekarang!
@@ -197,11 +206,12 @@ Partner - 30K
 Owner - 45K
 
 Modal kecil, cuan gede! Gas! 🔥`
-      );
-    }
+        );
+      }
 
-    if(cmd==='role' || cmd==='rolepanel' || cmd==='reseller' || cmd==='resellerpanel' || cmd==='legal'){
-      return reply(
+      // === RESELLER / ROLE ===
+      if (cmd === 'role' || cmd === 'rolepanel' || cmd === 'reseller' || cmd === 'resellerpanel' || cmd === 'legal') {
+        return reply(
 `👑 *ROLE PANEL LEGAL - ZUAN STORE* 👑
 ━━━━━━━━━━━━━━━━━━
 *BUKAN PANEL ABAL-ABAL, INI LEGAL 100%!*
@@ -272,11 +282,12 @@ Modal kecil, cuan gede! Gas! 🔥`
 ━━━━━━━━━━━━━━━━━━
 Gas join? Chat Owner sekarang!
 👑 wa.me/6281514262038`
-      );
-    }
+        );
+      }
 
-    if(cmd==='listharga'){
-      return reply(
+      // === LIST HARGA ===
+      if (cmd === 'listharga') {
+        return reply(
 `⚡ *LIST HARGA PANEL - ZUAN STORE* ⚡
 ━━━━━━━━━━━━━━━━━━
 *HARGA MURAH, KUALITAS SULTAN!*
@@ -315,11 +326,12 @@ Uptime: 99.9% - Gak Pernah Tidur!
 
 Mau jadi Reseller? Ketik *.reseller*
 Owner: wa.me/6281514262038`
-      );
-    }
+        );
+      }
 
-    if(cmd==='payment'){
-      return reply(
+      // === PAYMENT ===
+      if (cmd === 'payment') {
+        return reply(
 `💳 *PEMBAYARAN - ZUAN STORE* 💳
 ━━━━━━━━━━━━━━━━━━
 *TF DULU, BARU PANEL JADI!*
@@ -335,11 +347,12 @@ Jangan lupa, biar langsung diproses!
 
 Owner: wa.me/6281514262038
 *GAS TF, GAS JADI!* 🔥`
-      );
-    }
+        );
+      }
 
-    if(cmd==='garansi'){
-      return reply(
+      // === GARANSI ===
+      if (cmd === 'garansi') {
+        return reply(
 `🛡️ *GARANSI - ZUAN STORE* 🛡️
 ━━━━━━━━━━━━━━━━━━
 *KLAIM GAMPANG, GAK RIBET!*
@@ -355,11 +368,12 @@ Owner: wa.me/6281514262038
 
 Owner: wa.me/6281514262038
 *TENANG, PANEL LU AMAN DI TANGAN GUE!* 😎`
-      );
-    }
+        );
+      }
 
-    if(cmd==='rules'){
-      return reply(
+      // === RULES ===
+      if (cmd === 'rules') {
+        return reply(
 `📜 *RULES - ZUAN STORE* 📜
 ━━━━━━━━━━━━━━━━━━
 *BACA DULU, JANGAN LANGSUNG NGEYEL!*
@@ -373,11 +387,12 @@ Owner: wa.me/6281514262038
 ━━━━━━━━━━━━━━━━━━
 *LANGGAR = BAN TANPA REFUND!*
 *NO DRAMA, NO BACOT!* 😈`
-      );
-    }
+        );
+      }
 
-    if(cmd==='vps'){
-      return reply(
+      // === VPS ===
+      if (cmd === 'vps') {
+        return reply(
 `🖥️ *LIST VPS - ZUAN STORE* 🖥️
 ━━━━━━━━━━━━━━━━━━
 *<> PROMO DAY ONE <>*
@@ -403,11 +418,12 @@ HANYA *60K* - Sultan Punya!
 Owner: wa.me/6281514262038
 Ketik *.payment* buat pembayaran!
 *SIAPA CEPAT DIA DAPAT!* 🚀`
-      );
-    }
+        );
+      }
 
-    if(cmd==='buy' || cmd==='order'){
-      return reply(
+      // === BUY / ORDER ===
+      if (cmd === 'buy' || cmd === 'order') {
+        return reply(
 `🛒 *CARA ORDER - GAMPANG PARAH!* 🛒
 ━━━━━━━━━━━━━━━━━━
 
@@ -433,11 +449,12 @@ Ketik *.listharga* - Liat harga panel
 Ketik *.reseller* - Jadi Reseller
 Ketik *.vps* - Liat harga VPS
 *JANGAN CUMA DILIHAT, DIBELI!* 😈`
-      );
-    }
+        );
+      }
 
-    if(cmd==='panel'){
-      return reply(
+      // === PANEL ===
+      if (cmd === 'panel') {
+        return reply(
 `⚡ *INFO PANEL - ZUAN STORE* ⚡
 ━━━━━━━━━━━━━━━━━━
 Panel Pterodactyl, Anti Lag, Server Singapore / Germany.
@@ -450,12 +467,13 @@ Bayar: *.payment*
 Order: wa.me/6281514262038
 
 *PANEL MURAH, KUALITAS GAK MURAHAN!* 🔥`
-      );
-    }
+        );
+      }
 
-    if(cmd==='jodoh'){
-      const persen = Math.floor(Math.random()*100);
-      return reply(
+      // === JODOH ===
+      if (cmd === 'jodoh') {
+        const persen = Math.floor(Math.random() * 100);
+        return reply(
 `💘 *CEK JODOH - ZUAN STORE* 💘
 ━━━━━━━━━━━━━━━━━━
 Kecocokan Lu: *${persen}%*
@@ -464,29 +482,33 @@ ${persen > 70 ? '🔥 WAH GILA! JODOH BANGET NIH! GAS NIKAH! Gas halalin sekaran
 
 *Udah cek jodoh, sekarang cek panel!*
 Ketik *.listharga*`
-      );
-    }
+        );
+      }
 
-    if(cmd==='quotes'){
-      const q = [
-        'Jangan menyerah, panel murah masih banyak. Yang nyerah, yang rungkad!',
-        'Sukses itu butuh proses, bukan protes. Gas kerja, jangan banyak ngeluh!',
-        'Hidup itu pilihan, pilih panel di Zuan Store. Dijamin gak nyesel!',
-        'Kerja keras + Doa = Sukses. Cuan ngalir terus!',
-        'Jangan takut gagal, takutlah jadi beban keluarga. Gas bangkit!',
-        'Modal 2rb udah bisa punya panel. Alasan apa lagi buat gak mulai?',
-        'Orang sukses itu yang mulai duluan, bukan yang nunggu-nunggu. Gas!',
-      ];
-      return reply(
+      // === QUOTES ===
+      if (cmd === 'quotes') {
+        const q = [
+          'Jangan menyerah, panel murah masih banyak. Yang nyerah, yang rungkad!',
+          'Sukses itu butuh proses, bukan protes. Gas kerja, jangan banyak ngeluh!',
+          'Hidup itu pilihan, pilih panel di Zuan Store. Dijamin gak nyesel!',
+          'Kerja keras + Doa = Sukses. Cuan ngalir terus!',
+          'Jangan takut gagal, takutlah jadi beban keluarga. Gas bangkit!',
+          'Modal 2rb udah bisa punya panel. Alasan apa lagi buat gak mulai?',
+          'Orang sukses itu yang mulai duluan, bukan yang nunggu-nunggu. Gas!',
+        ];
+        return reply(
 `💬 *QUOTES BADASS* 💬
 ━━━━━━━━━━━━━━━━━━
-"${q[Math.floor(Math.random()*q.length)]}"
+"${q[Math.floor(Math.random() * q.length)]}"
 
 - Zuan Store 🔥
 Ketik *.quotes* lagi buat quotes baru!`
-      );
-    }
+        );
+      }
 
+    } catch (err) {
+      console.log('❌ ERROR BALAS CHAT:', err.message);
+    }
   });
 }
 
