@@ -121,11 +121,15 @@ async function start() {
 
     const { connection, lastDisconnect, qr } = update;
 
-    if (qr) {
+        if (qr) {
       currentQR = qr;
-      botStatus = 'QR BARU MUNCUL! Buka https://zuan-bot.fadehost.app & scan!';
-      console.log('QR BARU! Buka https://zuan-bot.fadehost.app');
-    }
+      botStatus = 'QR BARU MUNCUL! Scan di terminal / web!';
+      console.log('QR BARU! Scan di bawah ini:');
+      try {
+        const qrcode = require('qrcode-terminal');
+        qrcode.generate(qr, { small: true });
+      } catch(e) {}
+        }
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
