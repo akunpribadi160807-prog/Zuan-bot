@@ -2,15 +2,16 @@
 //  ZUAN STORE - BOT WHATSAPP
 //  OWNER : 6281514262038
 //  FITUR : MENU, HARGA, RESELLER, VPS, PAYMENT, ORDER OTOMATIS
-//  LOGIN : CUMA QR CODE, NO PAIRING CODE!
-//  WEB QR: https://zuan-bot.fadehost.app
+//  LOGIN : PAIRING CODE! NO QR!
+//  WEB PAIRING: https://zuan-bot.fadehost.app
 // ============================================================
 //  CARA PAKE:
 //  1. Upload file ini ke GitHub sebagai index.js
 //  2. Fadehost auto deploy
 //  3. Buka https://zuan-bot.fadehost.app
-//  4. Scan QR nya pake WA bot
-//  5. Beres! Bot nyambung!
+//  4. Copy Pairing Code nya
+//  5. WA > Perangkat Tertaut > Tautkan dengan nomor telepon
+//  6. Beres! Bot nyambung!
 // ============================================================
 
 let makeWASocket, useMultiFileAuthState, DisconnectReason;
@@ -50,19 +51,21 @@ const logger = {
 };
 
 // ============================================================
-//  QR & STATUS
-//  CUMA QR, NO PAIRING!
+//  PAIRING CODE & STATUS
 // ============================================================
 let currentQR = null;
-let botStatus = 'Lagi nyari QR... Tunggu bentar...';
+let pairingCode = null;
+let botStatus = 'Lagi nyari Pairing Code... Tunggu bentar...';
 
 // ============================================================
-//  WEB SERVER - BUAT NAMPILIN QR
+//  WEB SERVER - BUAT NAMPILIN PAIRING CODE
 // ============================================================
 const server = http.createServer((req, res) => {
 
   let qrImg = '';
-  if (currentQR) {
+  if (pairingCode) {
+    qrImg = `<div style="background:#1a1a1a;padding:20px;border-radius:20px;border:2px solid #25D366;"><h1 style="font-size:50px;letter-spacing:8px;color:#25D366;margin:0;">${pairingCode}</h1><p style="color:white;">Copy kode ini!</p></div>`;
+  } else if (currentQR) {
     qrImg = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(currentQR)}" style="border:10px solid white;border-radius:20px;">`;
   } else {
     qrImg = `<h2 style="color:white;">${botStatus}</h2>`;
@@ -74,17 +77,17 @@ const server = http.createServer((req, res) => {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>ZUAN STORE - SCAN QR</title>
+    <title>ZUAN STORE - PAIRING CODE</title>
     <meta http-equiv="refresh" content="5">
   </head>
   <body style="background:#0f0f0f;font-family:sans-serif;text-align:center;padding:20px;color:white;">
     <h1 style="font-size:28px;">⚡ ZUAN STORE ⚡</h1>
     <p style="color:#aaa;">Status: ${botStatus}</p>
-    <p>Scan QR di bawah ini pake WA lu!</p>
+    <p>Masukan kode di bawah ini di WA lu!</p>
     ${qrImg}
     <p style="color:#888;margin-top:20px;font-size:13px;">
       Halaman ini auto-refresh tiap 5 detik<br>
-      WA > Titik 3 > Perangkat Tertaut > Tautkan Perangkat > Scan QR ini
+      WA > Titik 3 > Perangkat Tertaut > Tautkan dengan nomor telepon > Masukin kode
     </p>
     <p style="color:#25D366;font-weight:bold;">Owner: wa.me/6281514262038</p>
   </body>
@@ -96,7 +99,7 @@ const server = http.createServer((req, res) => {
 
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
-  console.log('Web QR jalan di port ' + PORT);
+  console.log('Web Pairing jalan di port ' + PORT);
 });
 
 // ============================================================
@@ -109,52 +112,64 @@ async function start() {
   const sock = makeWASocket({
     auth: state,
     logger: logger,
-    browser: ['Zuan Store', 'Chrome', '1.0']
+    browser: ['Zuan Store', 'Chrome', '1.0'],
+    printQRInTerminal: false
   });
+
+  // === PAIRING CODE - KHUSUS NOMOR 6281514262038 ===
+  if (!sock.authState.creds.registered) {
+    setTimeout(async () => {
+      try {
+        const code = await sock.requestPairingCode("6281514262038");
+        pairingCode = code;
+        botStatus = 'KODE MUNCUL! Copy kode di web!';
+        console.log('====================================');
+        console.log('PAIRING CODE LU: ' + code);
+        console.log('====================================');
+      } catch (e) {
+        console.log('Gagal minta pairing code:', e.message);
+      }
+    }, 3000);
+  }
 
   sock.ev.on('creds.update', saveCreds);
 
   // ==========================================================
-  //  CONNECTION - CUMA QR!
+  //  CONNECTION
   // ==========================================================
   sock.ev.on('connection.update', (update) => {
 
     const { connection, lastDisconnect, qr } = update;
 
-        if (qr) {
+    if (qr) {
       currentQR = qr;
-      botStatus = 'QR BARU MUNCUL! Scan di terminal / web!';
-      console.log('QR BARU! Scan di bawah ini:');
-      try {
-        const qrcode = require('qrcode-terminal');
-        qrcode.generate(qr, { small: true });
-      } catch(e) {}
-        }
+      botStatus = 'QR BARU MUNCUL! Buka https://zuan-bot.fadehost.app & scan!';
+      console.log('QR BARU! Buka https://zuan-bot.fadehost.app');
+    }
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       console.log('Koneksi putus, kode:', statusCode);
 
-      // 401 = SESSION MATI! HARUS DIHAPUS BIAR QR BARU MUNCUL!
-      // KALO GAK DIHAPUS, BAKAL LOOP 401 TERUS!
       if (statusCode === 401 || statusCode === DisconnectReason.loggedOut) {
-        console.log('SESSION MATI! Hapus session mati, bikin QR baru...');
+        console.log('SESSION MATI! Hapus session mati, bikin kode baru...');
         try {
           fs.rmSync('session', { recursive: true, force: true });
         } catch (e) {}
         currentQR = null;
-        botStatus = 'Session lama mati, lagi bikin QR baru... Buka web!';
+        pairingCode = null;
+        botStatus = 'Session lama mati, lagi bikin kode baru... Buka web!';
         setTimeout(() => start(), 3000);
         return;
       }
 
-      // KALO PUTUS BIASA, RECONNECT AJA, JANGAN HAPUS SESSION!
       botStatus = 'Reconnect... Tunggu bentar, jangan scan ulang dulu!';
       setTimeout(() => start(), 5000);
     }
 
     if (connection === 'open') {
       currentQR = null;
+      pairingCode = null;
       botStatus = 'BOT NYAMBUNG! GACOR!';
       console.log('NYAMBUNG! BOT ZUAN STORE GACOR!');
     }
@@ -240,9 +255,6 @@ async function start() {
 
       console.log('⚡ CMD: ' + cmd + ' dari ' + senderNum);
 
-      // ------------------------------------------------------
-      //  .ping
-      // ------------------------------------------------------
       if (cmd === 'ping') {
         return reply(
           '⚡ *ZUAN STORE ONLINE BOS!* ⚡\n' +
@@ -252,9 +264,6 @@ async function start() {
         );
       }
 
-      // ------------------------------------------------------
-      //  .menu
-      // ------------------------------------------------------
       if (cmd === 'menu') {
         await reply(
           '╭━━━ *ZUAN STORE* ━━━╮\n' +
@@ -298,9 +307,6 @@ async function start() {
         );
       }
 
-      // ------------------------------------------------------
-      //  .reseller / .role / .legal
-      // ------------------------------------------------------
       if (cmd === 'role' || cmd === 'rolepanel' || cmd === 'reseller' || cmd === 'resellerpanel' || cmd === 'legal') {
         return reply(
           '👑 *ROLE PANEL LEGAL - ZUAN STORE* 👑\n' +
@@ -376,9 +382,6 @@ async function start() {
         );
       }
 
-      // ------------------------------------------------------
-      //  .listharga
-      // ------------------------------------------------------
       if (cmd === 'listharga') {
         return reply(
           '⚡ *LIST HARGA PANEL - ZUAN STORE* ⚡\n' +
@@ -416,9 +419,6 @@ async function start() {
         );
       }
 
-      // ------------------------------------------------------
-      //  .payment
-      // ------------------------------------------------------
       if (cmd === 'payment') {
         return reply(
           '💳 *PEMBAYARAN - ZUAN STORE* 💳\n' +
@@ -436,9 +436,6 @@ async function start() {
         );
       }
 
-      // ------------------------------------------------------
-      //  .garansi
-      // ------------------------------------------------------
       if (cmd === 'garansi') {
         return reply(
           '🛡️ *GARANSI - ZUAN STORE* 🛡️\n' +
@@ -451,9 +448,6 @@ async function start() {
         );
       }
 
-      // ------------------------------------------------------
-      //  .rules
-      // ------------------------------------------------------
       if (cmd === 'rules') {
         return reply(
           '📜 *RULES - ZUAN STORE* 📜\n' +
@@ -468,9 +462,6 @@ async function start() {
         );
       }
 
-      // ------------------------------------------------------
-      //  .vps
-      // ------------------------------------------------------
       if (cmd === 'vps') {
         return reply(
           '🖥️ *LIST VPS - ZUAN STORE* 🖥️\n' +
@@ -491,9 +482,6 @@ async function start() {
         );
       }
 
-      // ------------------------------------------------------
-      //  .buy / .order
-      // ------------------------------------------------------
       if (cmd === 'buy' || cmd === 'order') {
         return reply(
           '🛒 *CARA ORDER - GAMPANG PARAH!* 🛒\n' +
@@ -515,9 +503,6 @@ async function start() {
         );
       }
 
-      // ------------------------------------------------------
-      //  .panel
-      // ------------------------------------------------------
       if (cmd === 'panel') {
         return reply(
           '⚡ *INFO PANEL - ZUAN STORE* ⚡\n' +
@@ -530,9 +515,6 @@ async function start() {
         );
       }
 
-      // ------------------------------------------------------
-      //  .jodoh
-      // ------------------------------------------------------
       if (cmd === 'jodoh') {
         const persen = Math.floor(Math.random() * 100);
         let pesan = '';
@@ -552,9 +534,6 @@ async function start() {
         );
       }
 
-      // ------------------------------------------------------
-      //  .quotes
-      // ------------------------------------------------------
       if (cmd === 'quotes') {
         const q = [
           'Jangan menyerah, panel murah masih banyak. Yang nyerah, yang rungkad!',
