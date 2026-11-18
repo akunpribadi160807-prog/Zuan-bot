@@ -5,13 +5,6 @@
 //  LOGIN : QR DI WEB! NO PAIRING CODE!
 //  WEB QR: https://zuan-bot.fadehost.app
 // ============================================================
-//  CARA PAKE:
-//  1. Upload file ini ke GitHub sebagai index.js
-//  2. Di Awan: git pull -> npm install -> node index.js
-//  3. Buka https://zuan-bot.fadehost.app
-//  4. Scan QR nya pake WA
-//  5. Beres! Bot nyambung!
-// ============================================================
 
 let makeWASocket, useMultiFileAuthState, DisconnectReason;
 
@@ -31,14 +24,8 @@ const fs = require('fs');
 const http = require('http');
 const QRCode = require('qrcode');
 
-// ============================================================
-//  SETTING OWNER
-// ============================================================
 const OWNER = '6281514262038';
 
-// ============================================================
-//  LOGGER - BIAR LOG GAK PENUH
-// ============================================================
 const logger = {
   level: 'silent',
   child: () => logger,
@@ -50,25 +37,17 @@ const logger = {
   fatal: () => {}
 };
 
-// ============================================================
-//  QR & STATUS
-// ============================================================
 let currentQR = null;
 let lastQRImg = '';
 let botStatus = 'Lagi nyari QR... Tunggu bentar...';
 
-// ============================================================
-//  WEB SERVER - BUAT NAMPILIN QR DI FADEHOST
-// ============================================================
 const server = http.createServer((req, res) => {
-
   let qrImg = '';
   if (lastQRImg) {
     qrImg = `<img src="${lastQRImg}" style="border:10px solid white;border-radius:20px;width:90vw;max-width:350px;">`;
   } else {
     qrImg = `<h2 style="color:white;">${botStatus}</h2>`;
   }
-
   const html = `
   <!DOCTYPE html>
   <html>
@@ -90,23 +69,18 @@ const server = http.createServer((req, res) => {
     <p style="color:#25D366;font-weight:bold;">Owner: wa.me/6281514262038</p>
   </body>
   </html>`;
-
   res.writeHead(200, { 'Content-Type': 'text/html' });
   res.end(html);
 });
 
+// INI YANG GUE BENERIN! WAJIB 0.0.0.0 BIAR FADEHOST BISA DENGER!
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log('Web QR jalan di port ' + PORT);
 });
 
-// ============================================================
-//  FUNGSI UTAMA - START BOT
-// ============================================================
 async function start() {
-
   const { state, saveCreds } = await useMultiFileAuthState('session');
-
   const sock = makeWASocket({
     auth: state,
     logger: logger,
@@ -114,44 +88,31 @@ async function start() {
     printQRInTerminal: false
   });
 
-  // GA ADA PAIRING CODE LAGI!
-
   sock.ev.on('creds.update', saveCreds);
 
-  // ==========================================================
-  //  CONNECTION
-  // ==========================================================
   sock.ev.on('connection.update', async (update) => {
-
     const { connection, lastDisconnect, qr } = update;
-
     if (qr) {
       currentQR = qr;
       lastQRImg = await QRCode.toDataURL(qr, { width: 800, margin: 2 });
       botStatus = 'QR BARU MUNCUL! Buka https://zuan-bot.fadehost.app & scan!';
       console.log('QR BARU! Buka https://zuan-bot.fadehost.app');
     }
-
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       console.log('Koneksi putus, kode:', statusCode);
-
       if (statusCode === 401 || statusCode === DisconnectReason.loggedOut) {
         console.log('SESSION MATI! Hapus session mati, bikin QR baru...');
-        try {
-          fs.rmSync('session', { recursive: true, force: true });
-        } catch (e) {}
+        try { fs.rmSync('session', { recursive: true, force: true }); } catch (e) {}
         currentQR = null;
         lastQRImg = '';
         botStatus = 'Session lama mati, lagi bikin QR baru... Buka web!';
         setTimeout(() => start(), 3000);
         return;
       }
-
       botStatus = 'Reconnect... Tunggu bentar, jangan scan ulang dulu!';
       setTimeout(() => start(), 5000);
     }
-
     if (connection === 'open') {
       currentQR = null;
       lastQRImg = '';
@@ -160,9 +121,6 @@ async function start() {
     }
   });
 
-  // ==========================================================
-  //  PESAN MASUK - SAMA PERSIS KAYA FILE LAMA LU!
-  // ==========================================================
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     try {
       if (type !== 'notify') return;
