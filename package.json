@@ -2,10 +2,9 @@
   "name": "zuan-bot",
   "version": "1.0.0",
   "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
+  "scripts": { "start": "node index.js" },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.0"
+    "@whiskeysockets/baileys": "latest",
+    "qrcode-terminal": "^0.12.0"
   }
 }
